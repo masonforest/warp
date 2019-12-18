@@ -10,7 +10,7 @@ use std::task::{Context, Poll};
 
 use futures::{future, Stream};
 use headers::ContentType;
-use mime::Mime;
+use mime_guess::Mime;
 use multipart::server::Multipart;
 
 use crate::filter::{Filter, FilterBase};

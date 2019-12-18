@@ -151,8 +151,8 @@ pub fn aggregate() -> impl Filter<Extract = (impl Buf,), Error = Rejection> + Co
 // Require the `content-type` header to be this type (or, if there's no `content-type`
 // header at all, optimistically hope it's the right type).
 fn is_content_type(
-    type_: mime::Name<'static>,
-    subtype: mime::Name<'static>,
+    type_: &'static str,
+    subtype: &'static str,
 ) -> impl Filter<Extract = (), Error = Rejection> + Copy {
     filter_fn(move |route| {
         if let Some(value) = route.headers().get(CONTENT_TYPE) {
@@ -160,7 +160,7 @@ fn is_content_type(
             let ct = value
                 .to_str()
                 .ok()
-                .and_then(|s| s.parse::<mime::Mime>().ok());
+                .and_then(|s| s.parse::<mime_guess::Mime>().ok());
             if let Some(ct) = ct {
                 if ct.type_() == type_ && ct.subtype() == subtype {
                     future::ok(())
@@ -216,6 +216,38 @@ pub fn json<T: DeserializeOwned + Send>() -> impl Filter<Extract = (T,), Error =
     is_content_type(mime::APPLICATION, mime::JSON)
         .and(aggregate())
         .and_then(from_reader)
+}
+
+/// Returns a `Filter` that matches any request and extracts a `Future` of a
+/// CBOR-decoded body.
+///
+/// # Warning
+///
+/// This does not have a default size limit, it would be wise to use one to
+/// prevent a overly large request from using too much memory.
+///
+/// # Example
+///
+/// ```
+/// use std::collections::HashMap;
+/// use warp::Filter;
+///
+/// let route = warp::body::content_length_limit(1024 * 32)
+///     .and(warp::body::cbor())
+///     .map(|simple_map: HashMap<String, String>| {
+///         "Got a CBOR body!"
+///     });
+/// ```
+pub fn cbor<T: DeserializeOwned + Send>() -> impl Filter<Extract = (T,), Error = Rejection> + Copy {
+    is_content_type(mime::APPLICATION, mime::CBOR)
+        .and(concat())
+        .and_then(|buf: FullBody| {
+            future::ready(serde_cbor::from_slice(&buf.chunk).map_err(|err| {
+                println!("parseing cbor! error {:?}", buf.chunk.len());
+                log::debug!("request cbor body error: {}", err);
+                reject::known(BodyDeserializeError { cause: err.into() })
+            }))
+        })
 }
 
 /// Returns a `Filter` that matches any request and extracts a
