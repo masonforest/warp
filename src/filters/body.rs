@@ -239,15 +239,16 @@ pub fn json<T: DeserializeOwned + Send>() -> impl Filter<Extract = (T,), Error =
 ///     });
 /// ```
 pub fn cbor<T: DeserializeOwned + Send>() -> impl Filter<Extract = (T,), Error = Rejection> + Copy {
-    is_content_type(mime::APPLICATION, mime::CBOR)
-        .and(concat())
-        .and_then(|buf: FullBody| {
-            future::ready(serde_cbor::from_slice(&buf.chunk).map_err(|err| {
-                println!("parseing cbor! error {:?}", buf.chunk.len());
-                log::debug!("request cbor body error: {}", err);
-                reject::known(BodyDeserializeError { cause: err.into() })
-            }))
+    async fn from_reader<T: DeserializeOwned + Send>(buf: impl Buf) -> Result<T, Rejection> {
+        serde_cbor::from_reader(buf.reader()).map_err(|err| {
+            log::debug!("request cbor body error: {}", err);
+            reject::known(BodyDeserializeError { cause: err.into() })
         })
+    }
+
+    is_content_type(mime::APPLICATION, mime::CBOR)
+        .and(aggregate())
+        .and_then(from_reader)
 }
 
 /// Returns a `Filter` that matches any request and extracts a
